@@ -1,10 +1,15 @@
+#include <list>
+
+typedef struct _segLL {
+    int fd;
+    void *segMemory;
+    char *segName;
+} segLL;
+
 typedef struct _rvm_t {
-  char* dir;
+    char *directory;
+    std::list<segLL> *rvmSegs;
 } rvm_t;
 
 typedef struct _trans_t {
-  void** segbases;
-  int tid;
-  int numsegs;
-  struct _rvm_t rvm; 
 } trans_t;

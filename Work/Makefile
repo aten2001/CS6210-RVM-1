@@ -24,4 +24,3 @@ clean:
 	$(RM) $(LIBRARY) $(LIB_OBJ) *.o
 
 basic: librvm.a basic.o
-	gcc basic.o librvm.a -o basic
