@@ -9,9 +9,11 @@
 
 using namespace std;
 
+int taskID = 0; 
+
 rvm_t rvm_init(const char *directory){
     rvm_t newRVM;
-    
+        
     mkdir(directory, 0755);     //create directory for log files
     
     //Allocate memory for directory name
@@ -26,14 +28,12 @@ rvm_t rvm_init(const char *directory){
 }
 
 void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
-    int fd, initSize, result;
+    int fd, logfd, initSize, result;
     char buffer[1024];
     void* newMemory; 
     
     //copy log file into buffer
-    strcpy(buffer, rvm.directory);
-    strcat(buffer, "/");
-    strcat(buffer, segname);
+    sprintf(buffer, "%s/%s", rvm.directory, segname);
 
     //create/open seg file
     fd = open(buffer, O_RDWR | O_CREAT, 0755);
@@ -73,7 +73,16 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
         fprintf(stderr, "Error copying backing store to memory\n");
         return NULL;
     }
-        
+       
+    //Create log file for tthis segment
+    strcat(buffer, ".log");
+    logfd = open(buffer, O_RDWR | O_CREAT, 0755);
+    if (logfd==-1){                //if there was an error
+        close(logfd);
+        fprintf(stderr, "Error creating Log file\n");
+        return NULL;
+    }
+          
     //Create structure to hold info about 
     segLL* newSegment = (segLL*) malloc(sizeof(segLL));
     //Allocate memory for directory name
@@ -85,10 +94,16 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     newSegment->size = size_to_create;
     //Add file pointer to decrease loading times
     newSegment->fd = fd;
+    newSegment->logfd = logfd;
     //State not locked
     newSegment->locked = 0;
     //Add new segment to linked list
     rvm.rvmSegs->push_back(newSegment);
+    
+    //Insert info into log
+    sprintf(buffer, "%s - RVM_MAP used to map %s to memory 0x%X with size %d\n", RVM_MAP, segname, newMemory, size_to_create);
+    insertIntoLog(newSegment, buffer);    
+
     
     //return the memory allocation
     return newMemory;
@@ -99,14 +114,21 @@ void rvm_unmap(rvm_t rvm, void *segbase){
     for (list<segLL*>::iterator iterator = rvm.rvmSegs->begin(); iterator != rvm.rvmSegs->end(); ++iterator) {
              //if this is segment we are looking for
             if ((*iterator)->segMemory==segbase){
+                //Insert info into log
+                char buffer[1024];
+                sprintf(buffer, "%s - RVM_UNMAP used to unmap %s from memory Ox%X", RVM_UNMAP, (*iterator)->segName, segbase);
+                insertIntoLog(*iterator, buffer);    
+
                 //close this segments fd with file
                 close((*iterator)->fd);
+                close((*iterator)->logfd);
                 //Free memory
                 free((*iterator)->segName);
                 free(segbase);              //free the memory
                 free(*iterator);
                 //Remove from list
                 rvm.rvmSegs->erase(iterator);
+                
                 //quit looking
                 break;    
             }
@@ -117,10 +139,7 @@ void rvm_destroy(rvm_t rvm, const char *segname){
     char buffer[1024];
     
     //copy log file into buffer
-    strcpy(buffer, rvm.directory);
-    strcat(buffer, "/");
-    strcat(buffer, segname);
-    
+    sprintf(buffer, "%s/%s", rvm.directory, segname);
     //Remove disk mapped memory
     remove(buffer);
 }
@@ -133,6 +152,7 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
     newTrans.numsegs = numsegs;
     newTrans.segsUsed = (segLL**) malloc(numsegs*sizeof(segLL**));
     newTrans.changes = new list<regionMod>[numsegs];
+    newTrans.transID = taskID++;
         
     //Go through the segments to be used
     for (int i = 0; i<numsegs; i++){
@@ -140,6 +160,11 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
         for (list<segLL*>::iterator iterator = rvm.rvmSegs->begin(); iterator != rvm.rvmSegs->end(); ++iterator) {
             //if this is segment we are looking for
             if ((*iterator)->segMemory==segbases[i]){
+                //Insert info into log
+                char buffer[1024];
+                sprintf(buffer, "%d%s - RVM_BEGIN_TRANS adds %s to transaction %d\n", newTrans.transID, RVM_BEGIN_TRANS, (*iterator)->segName, newTrans.transID);
+                insertIntoLog(*iterator, buffer);    
+
                 //Add segment to transaction
                 newTrans.segsUsed[i] = (*iterator);
 
@@ -177,8 +202,13 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size){
             newRegion.oldMemory = (void*) malloc(size*sizeof(char));
             memcpy(newRegion.oldMemory, (char*)segbase+offset, size);
 
-
             tid.changes[i].push_back(newRegion);
+            
+            //Insert info into log
+            char buffer[1024];
+            sprintf(buffer, "%d%s - RVM_ABOUT_TO_MODIFY adds to transaction %d region with offest %d and size %d\n", tid.transID, RVM_ABOUT_TO_MODIFY, tid.transID, offset, size);
+            insertIntoLog(tid.segsUsed[i], buffer);    
+
         }
     }
 
@@ -186,7 +216,7 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size){
 
 void rvm_commit_trans(trans_t tid){
     
-      //Go through the segments to be used
+    //Go through the segments to be used
     for (int i = 0; i<tid.numsegs; i++){
        //Go through each change for the segment
         for (list<regionMod>::iterator iterator = tid.changes[i].begin(); iterator != tid.changes[i].end(); ++iterator) {
@@ -196,15 +226,6 @@ void rvm_commit_trans(trans_t tid){
             int size = iterator->size;
             int fd = tid.segsUsed[i]->fd;
 
-    char buffer[1024];
-    
-    //copy log file into buffer
-    strcpy(buffer, tid.rvm.directory);
-    strcat(buffer, "/");
-    strcat(buffer, tid.segsUsed[i]->segName);
-
-    fd = open(buffer, O_RDWR, 0755);
-
             //Write about file
             lseek(fd, offset, SEEK_SET);    //go to location
             if (write(fd, (char*)base + offset, size) != size) {       //write from memory
@@ -212,9 +233,14 @@ void rvm_commit_trans(trans_t tid){
                 fprintf(stderr, "Error writing to file.\n");
                 return;
             }
+            
+            //Insert info into log
+            char buffer[1024];
+            sprintf(buffer, "%d%s - RVM_COMMIT commit to transaction %d region with offest %d and size %d\n", tid.transID, RVM_COMMIT, tid.transID, offset, size);
+            insertIntoLog(tid.segsUsed[i], buffer);    
 
-
-            close(fd);  //sync memory
+            free(iterator->oldMemory);
+            fsync(fd);  //sync memory
                         
             //Unlock memory
             tid.segsUsed[i]->locked = 0;
@@ -237,7 +263,13 @@ void rvm_abort_trans(trans_t tid){
             
             //Get back old memory
             memcpy((char*)base+offset, iterator->oldMemory, size);
-                        
+            free(iterator->oldMemory);
+                
+            //Insert info into log
+            char buffer[1024];
+            sprintf(buffer, "%d%s - RVM_ABORT aborts transaction %d region with offest %d and size %d\n", tid.transID, RVM_ABORT, tid.transID, offset, size);
+            insertIntoLog(tid.segsUsed[i], buffer);    
+                                                
             //Unlock memory
             tid.segsUsed[i]->locked = 0;
         }
@@ -245,6 +277,16 @@ void rvm_abort_trans(trans_t tid){
     
     //Free memory
     free(tid.segsUsed);
+}
+
+void insertIntoLog(segLL* seg, char* message){  
+    int length = write(seg->logfd, message, strlen(message));   
+    if (length != strlen(message)) {       //write from memory
+        close(seg->logfd);
+        fprintf(stderr, "Error writing to log file.\n");
+        return;
+    }
+    fsync(seg->logfd);
 }
 
 void rvm_truncate_log(rvm_t rvm){
