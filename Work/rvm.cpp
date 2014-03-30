@@ -54,8 +54,8 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     if (initSize<size_to_create){
         //Try to exapnd    
         lseek(fd, size_to_create - 1, SEEK_SET);
-        result = write(fd, "", 1);
-        if (initSize == -1) {           //check if successful
+        result = write(fd, "\0", 1);
+        if (result == -1) {           //check if successful
             close(fd);
             fprintf(stderr, "Error increasing file size\n");
             return NULL;
@@ -68,11 +68,6 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     //Sync malloc with store
     lseek(fd, 0, SEEK_SET);     //move back to beginning
     result = read(fd, newMemory, size_to_create);       //copy memory
-    if (initSize == -1) {
-        close(fd);
-        fprintf(stderr, "Error copying backing store to memory\n");
-        return NULL;
-    }
        
     //Create log file for tthis segment
     strcat(buffer, ".log");
@@ -138,8 +133,13 @@ void rvm_unmap(rvm_t rvm, void *segbase){
 void rvm_destroy(rvm_t rvm, const char *segname){
     char buffer[1024];
     
-    //copy log file into buffer
+    //copy  file into buffer
     sprintf(buffer, "%s/%s", rvm.directory, segname);
+    //Remove disk mapped memory
+    remove(buffer);
+    
+    //copy  file into buffer
+    sprintf(buffer, "%s/%s.log", rvm.directory, segname);
     //Remove disk mapped memory
     remove(buffer);
 }
