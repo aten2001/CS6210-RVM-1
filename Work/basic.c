@@ -1,96 +1,68 @@
-/* multi.c - test that basic persistency works for multiple segments */
-
+/* abort.c - test that aborting a modification returns the segment to
+ * its initial state */
 
 #include "rvm.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 
-#define SEGNAME0  "testseg1"
-#define SEGNAME1  "testseg2"
-
-#define OFFSET0  10
-#define OFFSET1  100
-
-#define STRING0 "hello, world"
-#define STRING1 "black agagadrof!"
+#define TEST_STRING1 "hello, world"
+#define TEST_STRING2 "bleg!"
+#define OFFSET2 1000
 
 
-void proc1() 
+int main(int argc, char **argv)
 {
      rvm_t rvm;
-     char* segs[2];
+     char *seg;
+     char *segs[1];
      trans_t trans;
      
      rvm = rvm_init("rvm_segments");
-
-     rvm_destroy(rvm, SEGNAME0);
-     rvm_destroy(rvm, SEGNAME1);
-
-     segs[0] = (char*) rvm_map(rvm, SEGNAME0, 1000);
-     segs[1] = (char*) rvm_map(rvm, SEGNAME1, 1000);
-
-     trans = rvm_begin_trans(rvm, 2, (void **)segs);
-
-     rvm_about_to_modify(trans, segs[0], OFFSET0, 100);
-     strcpy(segs[0]+OFFSET0, STRING0);
-fprintf(stderr, "boo:%s %d\n",segs[0]+OFFSET0, 1);
-
-     rvm_about_to_modify(trans, segs[1], OFFSET1, 100);
-     strcpy(segs[0]+OFFSET1, STRING1);
-fprintf(stderr, "boo:%s %d\n",segs[1]+OFFSET1, 1);
-
-          rvm_commit_trans(trans);
-
      
-     abort();
-}
+     rvm_destroy(rvm, "testseg");
+     
+     segs[0] = (char *) rvm_map(rvm, "testseg", 10000);
+     seg = segs[0];
+
+     /* write some data and commit it */
+     trans = rvm_begin_trans(rvm, 1, (void**) segs);
+     rvm_about_to_modify(trans, seg, 0, 100);
+     sprintf(seg, TEST_STRING1);
+     
+     rvm_about_to_modify(trans, seg, OFFSET2, 100);
+     sprintf(seg+OFFSET2, TEST_STRING1);
+     
+     rvm_commit_trans(trans);
+
+     /* start writing some different data, but abort */
+     trans = rvm_begin_trans(rvm, 1, (void**) segs);
+     rvm_about_to_modify(trans, seg, 0, 100);
+     sprintf(seg, TEST_STRING2);
+     
+     rvm_about_to_modify(trans, seg, OFFSET2, 100);
+     sprintf(seg+OFFSET2, TEST_STRING2);
+
+     rvm_abort_trans(trans);
 
 
-void proc2() 
-{
-     rvm_t rvm;
-     char *segs[2];
-
-     rvm = rvm_init("rvm_segments");
-     segs[0] = (char*) rvm_map(rvm, SEGNAME0, 1000);
-     segs[1] = (char*) rvm_map(rvm, SEGNAME1, 1000);
-
-     if(strcmp(segs[0] + OFFSET0, STRING0)) {
-	  printf("ERROR in segment 0 (%s)\n",
-		 segs[0]+OFFSET0);
-	  //exit(2);
-     }
-     if(strcmp(segs[1] + OFFSET1, STRING1)) {
-	  printf("ERROR in segment 1 (%s)\n",
-		 segs[1]+OFFSET1);
+     /* test that the data was restored */
+     if(strcmp(seg+OFFSET2, TEST_STRING1)) {
+	  printf("ERROR: second hello is incorrect (%s)\n",
+		 seg+OFFSET2);
 	  exit(2);
      }
 
+     if(strcmp(seg, TEST_STRING1)) {
+	  printf("ERROR: first hello is incorrect (%s)\n",
+		 seg);
+	  exit(2);
+     }
+     
+
+     rvm_unmap(rvm, seg);
      printf("OK\n");
-}
-
-
-int main(int argc, char **argv) 
-{
-     int pid;
-
-     pid = fork();
-     if(pid < 0) {
-	  perror("fork");
-	  exit(2);
-     }
-     if(pid == 0) {
-	  proc1();
-	  exit(0);
-     }
-
-     waitpid(pid, NULL, 0);
-
-     proc2();
-
-     return 0;
+     exit(0);
 }
 

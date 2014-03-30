@@ -63,7 +63,7 @@ void *rvm_map(rvm_t rvm, const char *segname, int size_to_create){
     }
     
     //Allocate memory since backing store good
-    newMemory = malloc(sizeof(size_to_create));
+    newMemory = malloc(size_to_create*sizeof(char));
    
     //Sync malloc with store
     lseek(fd, 0, SEEK_SET);     //move back to beginning
@@ -142,7 +142,6 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases){
             if ((*iterator)->segMemory==segbases[i]){
                 //Add segment to transaction
                 newTrans.segsUsed[i] = (*iterator);
-                fprintf(stderr, "%d %d\n", i, newTrans.segsUsed[i]);
 
                 //check if locked
                 if ((*iterator)->locked==0){
@@ -172,15 +171,14 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size){
 
     //Go through the segments to be used
     for (int i = 0; i<tid.numsegs; i++){
-
         //Find corresponding segment and add region
         if (tid.segsUsed[i]->segMemory == segbase){
-
-            tid.changes[i].push_back(newRegion);
-
             //copy over old data to preserve it
             newRegion.oldMemory = (void*) malloc(size*sizeof(char));
             memcpy(newRegion.oldMemory, (char*)segbase+offset, size);
+
+
+            tid.changes[i].push_back(newRegion);
         }
     }
 
@@ -190,8 +188,6 @@ void rvm_commit_trans(trans_t tid){
     
       //Go through the segments to be used
     for (int i = 0; i<tid.numsegs; i++){
-        //fprintf(stderr, "%d %d\n", i, tid.segsUsed[i]);
-
        //Go through each change for the segment
         for (list<regionMod>::iterator iterator = tid.changes[i].begin(); iterator != tid.changes[i].end(); ++iterator) {
             //Stats about file
@@ -207,24 +203,22 @@ void rvm_commit_trans(trans_t tid){
     strcat(buffer, "/");
     strcat(buffer, tid.segsUsed[i]->segName);
 
-    fd = open(buffer, O_RDWR | O_CREAT, 0755);
+    fd = open(buffer, O_RDWR, 0755);
 
             //Write about file
             lseek(fd, offset, SEEK_SET);    //go to location
             if (write(fd, (char*)base + offset, size) != size) {       //write from memory
                 close(fd);
-                fprintf(stderr, "Error writing to the file during commit.\n");
+                fprintf(stderr, "Error writing to file.\n");
                 return;
             }
 
-fprintf(stderr, "%s %s\n",  buffer,  (char*)base + offset);
 
             close(fd);  //sync memory
                         
             //Unlock memory
             tid.segsUsed[i]->locked = 0;
         }
-
     }
     
     //Free memory
@@ -232,9 +226,9 @@ fprintf(stderr, "%s %s\n",  buffer,  (char*)base + offset);
 }
 
 void rvm_abort_trans(trans_t tid){
-    //Go through the segments to be used
+      //Go through the segments to be used
     for (int i = 0; i<tid.numsegs; i++){
-        //Go through each change for the segment
+       //Go through each change for the segment
         for (list<regionMod>::iterator iterator = tid.changes[i].begin(); iterator != tid.changes[i].end(); ++iterator) {
             //Stats about file
             void* base = tid.segsUsed[i]->segMemory;
@@ -250,7 +244,6 @@ void rvm_abort_trans(trans_t tid){
     }
     
     //Free memory
-    free(tid.changes);
     free(tid.segsUsed);
 }
 
