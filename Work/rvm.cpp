@@ -290,5 +290,26 @@ void insertIntoLog(segLL* seg, char* message){
 }
 
 void rvm_truncate_log(rvm_t rvm){
+    char buffer[1024];
+
+    //Go through all segments
+    for (list<segLL*>::iterator iterator = rvm.rvmSegs->begin(); iterator != rvm.rvmSegs->end(); ++iterator) {
+        //Open Log file
+        sprintf(buffer, "%s/%s.log", rvm.directory, (*iterator)->segName);
+        FILE *f = fopen (buffer, "r");
+                    
+        if (f != NULL){
+            int i = 0;
+            //Read in each line of file
+            while (fgets (buffer, sizeof(buffer), f) != NULL ){
+
+            
+            }
+            fclose(f);
+       }else{
+            fprintf(stderr, "Could not open log");
+            return;
+        }
+    }
 }
 

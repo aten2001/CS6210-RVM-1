@@ -40,6 +40,7 @@ void proc1()
      strcpy(segs[1]+OFFSET1, STRING1);
 
      rvm_commit_trans(trans);
+rvm_truncate_log(rvm);
 
      abort();
 }
@@ -64,7 +65,6 @@ void proc2()
 		 segs[1]+OFFSET1);
 	  exit(2);
      }
-
      printf("OK\n");
 }
 
